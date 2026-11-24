@@ -1,0 +1,156 @@
+name: Linters
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  commit-lint:
+    # Conventional commits on PR commits, hrms pattern: release-notes-generatable
+    # history for derived apps.
+    name: 'Semantic Commits'
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 200
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          check-latest: true
+
+      - name: Check commit titles
+        run: |
+          npm install @commitlint/cli @commitlint/config-conventional
+          npx commitlint --verbose --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }}
+
+  secrets:
+    # gitleaks: secrets scanning is a separate category from semgrep's
+    # Python-code security scanning (ADR 0001, amended scope note). Full
+    # history scan so secrets committed without pre-commit installed are
+    # still caught.
+    name: 'Secrets Scan (gitleaks)'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        # Pinned; keep in sync with the gitleaks rev in .pre-commit-config.yaml.
+        run: |
+          GITLEAKS_VERSION=8.28.0
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install gitleaks /usr/local/bin/
+
+      - name: Scan for secrets
+        run: gitleaks git --redact --verbose .
+
+  markdownlint:
+    # markdownlint-cli2 against the repo config (.markdownlint-cli2.jsonc).
+    name: 'Markdown Lint'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          check-latest: true
+
+      - name: Run markdownlint-cli2
+        run: npx --yes markdownlint-cli2 "**/*.md"
+
+  linter:
+    name: 'Frappe Linter'
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+          cache: pip
+      # Hash-pinned (zizmor unpinned-uses); v3.0.0.
+      - uses: pre-commit/action@646c83fcd040023954eafda54b4db0192ce70507
+
+      - name: Download Semgrep rules
+        run: git clone --depth 1 https://github.com/frappe/semgrep-rules.git frappe-semgrep-rules
+
+      - name: Run Semgrep rules
+        # frappe rules (framework misuse) + python correctness + python
+        # best-practice + p/bandit (stdlib security port, per ADR 0001 —
+        # p/security-audit was evaluated and rejected: zero incremental
+        # findings, noisy tier).
+        run: |
+          pip install semgrep
+          semgrep ci --config ./frappe-semgrep-rules/rules --config r/python.lang.correctness --config r/python.lang.best-practice --config p/bandit
+
+  typecheck:
+    # basedmypy per ADR 0003: scoped to the app's own modules via the files=
+    # list in pyproject.toml; frappe itself is not installed here (framework
+    # imports are covered by ignore_missing_imports).
+    name: 'Type Check (basedmypy)'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+          cache: pip
+
+      - name: Install basedmypy
+        # Keep in sync with [tool.bench.dev-dependencies] in pyproject.toml.
+        run: pip install "basedmypy~=2.10"
+
+      - name: Run basedmypy
+        run: mypy
+
+  deps-vulnerable-check:
+    name: 'Vulnerable Dependency Check'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Cache pip
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/*requirements.txt', '**/pyproject.toml', '**/setup.py') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+            ${{ runner.os }}-
+
+      - name: Install and run pip-audit
+        run: |
+          pip install pip-audit
+          cd "${GITHUB_WORKSPACE}"
+          pip-audit --desc on .

@@ -1,0 +1,131 @@
+# Note: the .git alternative must be anchored (^\.git/) — an unanchored .git
+# would also match .github/, silently excluding workflow files from hooks
+# that target them (actionlint, zizmor).
+exclude: 'node_modules|^\.git/'
+default_stages: [pre-commit]
+fail_fast: false
+
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        files: "smart_npd_module.*"
+        exclude: ".*json$|.*txt$|.*csv|.*md|.*svg"
+      - id: check-merge-conflict
+      - id: check-ast
+      - id: check-json
+      - id: check-toml
+      - id: check-yaml
+      - id: debug-statements
+      # Second tier (2026-09-30 strictness pass): cheap conventional gates.
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: check-docstring-first
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.10
+    hooks:
+      - id: ruff
+        name: "Run ruff import sorter"
+        args: ["--select=I", "--fix"]
+
+      - id: ruff
+        name: "Run ruff linter"
+
+      - id: ruff-format
+        name: "Run ruff formatter"
+
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v2.7.1
+    hooks:
+      - id: prettier
+        types_or: [javascript, vue, scss]
+        # Ignore any files that might contain jinja / bundles
+        exclude: |
+            (?x)^(
+                smart_npd_module/public/dist/.*|
+                .*node_modules.*|
+                .*smart_npd_module.*|
+                smart_npd_module/templates/includes/.*|
+                smart_npd_module/public/js/lib/.*
+            )$
+
+
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v8.44.0
+    hooks:
+      - id: eslint
+        types_or: [javascript]
+        args: ['--quiet']
+        # Ignore any files that might contain jinja / bundles
+        exclude: |
+            (?x)^(
+                smart_npd_module/public/dist/.*|
+                .*node_modules.*|
+                .*smart_npd_module.*|
+                smart_npd_module/templates/includes/.*|
+                smart_npd_module/public/js/lib/.*
+            )$
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.28.0
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.18.1
+    hooks:
+      - id: markdownlint-cli2
+
+  # GitHub Actions hygiene: actionlint (correctness) + zizmor (workflow
+  # security). Both also run in CI via the linter leg's pre-commit action.
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.9
+    hooks:
+      - id: actionlint
+
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.9.0
+    hooks:
+      - id: zizmor
+
+  # Typos in a docs-heavy repo (CONTEXT, ADRs, agent docs).
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.3
+    hooks:
+      - id: codespell
+
+  # Docstring correctness (params match signature), not coverage — config in
+  # pyproject.toml [tool.pydoclint] (ADR 0005).
+  - repo: https://github.com/jsh9/pydoclint
+    rev: 0.10.1
+    hooks:
+      - id: pydoclint
+        args: [--style=google]
+
+  # Jinja template lint. Lint only — no reformat hook: templates/includes/
+  # is deliberately unformatted (may carry jinja), and adopting djLint's
+  # formatter is a separate decision. Dormant until templates exist; arms
+  # itself in derived apps.
+  - repo: https://github.com/djlint/djLint
+    rev: v1.46.3
+    hooks:
+      - id: djlint-jinja
+        args: [--lint]
+        # The hook manifest's types_or is [jinja] (.jinja/.j2 only) — Frappe
+        # templates are .html, so override the type filter or the hook never
+        # matches (files: and types_or: intersect).
+        types_or: [html]
+        files: ^smart_npd_module/(templates|www)/.*\.html$
+
+ci:
+    autoupdate_schedule: weekly
+    skip: []
+    submodules: false

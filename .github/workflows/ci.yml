@@ -1,0 +1,194 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: main-smart_npd_module-${{ github.event.number }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Supported Frappe branches (ADR 0002). To drop v15 at EOL, delete
+        # "version-15" here — this list is the only place a branch is removed.
+        # (The smoke leg below pins the newest branch; bump it when a new
+        # major is added.) The v15 leg runs the Python floor (3.13, as on the
+        # local bench15); v16 runs 3.14. Node 24 / MariaDB 11.8 on both.
+        frappe_branch: [version-15, version-16]
+        include:
+          - frappe_branch: version-15
+            python: '3.13'
+          - frappe_branch: version-16
+            python: '3.14'
+    name: Server (Frappe ${{ matrix.frappe_branch }})
+
+    services:
+      redis-cache:
+        image: redis:alpine
+        ports:
+          - 13000:6379
+      redis-queue:
+        image: redis:alpine
+        ports:
+          - 11000:6379
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: --health-cmd="mariadb-admin ping" --health-interval=5s --health-timeout=2s --health-retries=3
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Find tests
+        run: |
+          echo "Finding tests"
+          grep -rn "def test" > /dev/null
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          check-latest: true
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/*requirements.txt', '**/pyproject.toml', '**/setup.py', '**/setup.cfg') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+            ${{ runner.os }}-
+
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: 'echo "dir=$(yarn cache dir)" >> "$GITHUB_OUTPUT"'
+
+      - uses: actions/cache@v4
+        id: yarn-cache
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Install MariaDB Client
+        run: |
+          sudo apt update
+          sudo apt-get install mariadb-client
+
+      - name: Setup
+        run: |
+          pip install frappe-bench
+          bench init --frappe-branch ${{ matrix.frappe_branch }} --skip-redis-config-generation --skip-assets --python "$(which python)" ~/frappe-bench
+
+      - name: Install
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench get-app smart_npd_module "$GITHUB_WORKSPACE"
+          bench setup requirements --dev
+          bench new-site --db-root-password root --admin-password admin test_site
+          bench --site test_site install-app smart_npd_module
+          bench build
+        env:
+          CI: 'Yes'
+
+      - name: Run Tests
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench --site test_site set-config allow_tests true
+          bench --site test_site run-tests --app smart_npd_module
+        env:
+          TYPE: server
+
+  smoke-soft-link:
+    # Install contract smoke leg: the app must install identically with
+    # `bench get-app --soft-link`. Soft-link differs from a normal get-app
+    # only in the fetch step, so one leg suffices. Runs against the newest
+    # supported Frappe branch (keep in sync with the tests matrix above).
+    runs-on: ubuntu-latest
+    name: Smoke (soft-link, Frappe version-16)
+
+    services:
+      redis-cache:
+        image: redis:alpine
+        ports:
+          - 13000:6379
+      redis-queue:
+        image: redis:alpine
+        ports:
+          - 11000:6379
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: --health-cmd="mariadb-admin ping" --health-interval=5s --health-timeout=2s --health-retries=3
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          check-latest: true
+
+      - name: Install MariaDB Client
+        run: |
+          sudo apt update
+          sudo apt-get install mariadb-client
+
+      - name: Setup
+        run: |
+          pip install frappe-bench
+          bench init --frappe-branch version-16 --skip-redis-config-generation --skip-assets --python "$(which python)" ~/frappe-bench
+
+      - name: Install (soft-link)
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench get-app --soft-link smart_npd_module "$GITHUB_WORKSPACE"
+          bench setup requirements --dev
+          bench new-site --db-root-password root --admin-password admin test_site
+          bench --site test_site install-app smart_npd_module
+          bench --site test_site migrate
+          bench build
+        env:
+          CI: 'Yes'
+
+      - name: Run Smoke Test
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench --site test_site set-config allow_tests true
+          bench --site test_site run-tests --app smart_npd_module --module smart_npd_module.smart_npd_module.doctype.smart_npd_module_settings.test_smart_npd_module_settings
+        env:
+          TYPE: server

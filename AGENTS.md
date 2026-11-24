@@ -1,0 +1,108 @@
+# AGENTS.md
+
+Frappe app (built by `bench new-app`), not a standalone Python package. It only
+runs inside a [bench](https://github.com/frappe/bench) environment alongside
+Frappe, MariaDB, and two Redis instances — there is no local dev server,
+virtualenv, or `pytest` flow in this repo.
+
+Domain terms (Marketplace-ready, Settings DocType, strict tooling) are defined
+in `CONTEXT.md`; security-scanning rationale in `docs/adr/0001-security-scanning-via-semgrep.md`.
+
+## CodeGraph
+
+This repo is indexed by CodeGraph (`.codegraph/` at the root). Reach for it
+BEFORE grep/find or reading files when you need to understand or locate code:
+`codegraph explore "<symbol names or question>"` (shell, always works) or the
+`codegraph_explore` MCP tool returns the relevant symbols' verbatim source plus
+call paths in one call. Don't re-verify its results with grep.
+
+## Commands
+
+| Task | Command |
+| --- | --- |
+| Lint + format everything | `pre-commit run --all-files` |
+| Type check (basedmypy) | `mypy` (config in `pyproject.toml` `[tool.mypy]`) |
+| Tests | `bench --site test_site run-tests --app smart_npd_module` |
+| One test module | add `--module smart_npd_module.path.to.module` |
+| One test | add `--test <test_name>` |
+| Security scan (as CI) | `semgrep ci --config <frappe-semgrep-rules>/rules --config r/python.lang.correctness --config r/python.lang.best-practice --config p/bandit` |
+| Secrets scan | `gitleaks git --redact .` |
+| Dependency audit | `pip-audit --desc on .` |
+| Markdown lint | `npx markdownlint-cli2 "**/*.md"` |
+| Commit lint (PR commits) | `npx commitlint --from <base-sha> --to <head-sha>` |
+
+- Tests require a bench with the app installed and
+  `bench --site test_site set-config allow_tests true`. Full setup sequence is
+  in `.github/workflows/ci.yml` (bench init → get-app → new-site → install-app
+  → bench build).
+- CI (tests) triggers on pushes to `main` + PRs; Linters (`linter.yml`) on
+  PRs + manual dispatch. Workflows are the truth.
+
+## Layout
+
+- `smart_npd_module/` is the Python package; `hooks.py` is the extension
+  point (all Frappe hooks; `use_json_request_body`, `export_python_type_annotations`,
+  and `require_type_annotated_api_methods` are active, the rest commented stubs).
+  Never patch Frappe core; hook-based extension only.
+- `smart_npd_module/smart_npd_module/` is the module dir named in
+  `modules.txt`; DocTypes go in a `doctype/<name>/` subdir under it. Ships the
+  Settings DocType (`smart_npd_module_settings/`).
+- All tests subclass `SmartNPDModuleTestSuite` (`smart_npd_module/tests/`),
+  the app-level base class absorbing the v15/v16 `FrappeTestCase` /
+  `IntegrationTestCase` divergence (ADR 0002). Never subclass framework test
+  classes directly.
+- DB patches: create `smart_npd_module/patches/<name>.py` AND register it
+  in `patches.txt` under `[pre_model_sync]` or `[post_model_sync]`, or it never runs.
+- Frappe is a bench-managed dependency (commented out in `pyproject.toml` on
+  purpose). Don't add it to `dependencies`.
+
+## Style & tooling quirks
+
+- Python ≥ 3.13 (ruff `target-version = "py313"`; bench15 and the v15 CI leg
+  run 3.13, so no 3.14-only syntax). Ruff: **tab indentation**,
+  double quotes, line-length 110, `E501`/`F401` ignored.
+- Module size is a review convention, not a linter rule (ADR 0004: ruff has
+  no file-length rule and Frappe idioms legitimately produce long declarative
+  files). Split a Python module when it gains a second responsibility;
+  ~400–500 lines of hand-written code is the threshold for asking the
+  question. Exempt by nature: `hooks.py` (declarative registry), DocType
+  `*.json` (generated), test modules, patches.
+- Pre-commit runs ruff (import-sort + lint + format), prettier (js/vue/scss),
+  eslint 8, gitleaks (secrets), markdownlint-cli2 (config in
+  `.markdownlint-cli2.jsonc`), actionlint + zizmor (GitHub Actions
+  correctness/security), codespell, and the generic pre-commit-hooks gates
+  (large files, EOF, line endings, shebang-exec consistency, private keys).
+  actionlint runs shellcheck on `run:` blocks only when shellcheck is
+  installed — without it those checks are silently skipped (CI has it;
+  install it locally to match). Pre-commit also runs pydoclint (docstring
+  correctness, not coverage — ADR 0005) and djLint (jinja lint, dormant
+  until templates exist). PRs get advisory size labels (`pr-size.yml`,
+  never blocking; the size convention is in README's Contributing).
+  CI additionally runs commitlint
+  (config-conventional) on PR commits, basedmypy type checking, and pip-audit.
+  Prettier/eslint exclude `public/dist/`,
+  `templates/includes/`, `public/js/lib/`, and any path containing
+  `smart_npd_module` — files there are intentionally unlinted (may contain jinja or
+  vendored bundles).
+- No Bandit: ADR 0001 deliberately consolidated Python security scanning into
+  semgrep (`linter.yml` runs the frappe rules + `r/python.lang.correctness` +
+  `r/python.lang.best-practice` + `p/bandit`; `p/security-audit` was
+  evaluated and rejected — see the ADR's 2026-09-30 amendment). Suppress
+  findings with `# nosemgrep`, not `# nosec`. Don't add a second security
+  scanner without revisiting the ADR.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked as GitHub issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles are used as-is (`needs-triage`, `needs-info`,
+`ready-for-agent`, `ready-for-human`, `wontfix`). See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

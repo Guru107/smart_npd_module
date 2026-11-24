@@ -1,0 +1,180 @@
+[project]
+name = "smart_npd_module"
+authors = [
+    { name = "Gurudatt Kulkarni", email = "connect@gurudatt.in"}
+]
+description = "New Product Development (APQP / IATF 16949) on Frappe and ERPNext"
+requires-python = ">=3.13"
+readme = "README.md"
+dynamic = ["version"]
+dependencies = [
+    # "frappe~=16.0.0" # Installed and managed by bench.
+]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+# These dependencies are only installed when developer mode is enabled
+[tool.bench.dev-dependencies]
+# Type checking per ADR 0003 (mirrors frappe core's dev extras). Add types-*
+# stubs here as the app gains typed third-party dependencies.
+basedmypy = "~=2.10"
+
+# These apt dependencies will be installed from Ubuntu repositories when you host your app on Frappe Cloud
+# Supported Frappe majors (bench checks this on install).
+[tool.bench.frappe-dependencies]
+frappe = ">=15.0.0,<17.0.0"
+
+[deploy.dependencies.apt]
+packages = []
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "F",
+    "E",
+    "W",
+    "I",
+    "UP",
+    "B",
+    "RUF",
+    # Expansion beyond the bench template (ADR 0003): simplifications,
+    # complexity, pylint errors/warnings (selected PL: PLE+PLW; the convention
+    # and refactor tiers fight Frappe idioms and duplicate C90), annotations.
+    "SIM",
+    "C90",
+    "PLE",
+    "PLW",
+    "ANN",
+    # Second expansion (2026-09-30, verified zero-finding on this repo):
+    # comprehensions, exception messages, error handling, return flow,
+    # performance, modern idioms, logging, __future__ annotations, naming,
+    # import tidy, string concat, pathlib, executables, print detection.
+    "C4",
+    "EM",
+    "TRY",
+    "RET",
+    "PERF",
+    "FURB",
+    "LOG",
+    "G",
+    "FA",
+    "N",
+    "TID",
+    "ISC",
+    "PTH",
+    "EXE",
+    "T20",
+    # Third expansion (2026-09-30, docs/research/2026-09-30-review-simplicity-tooling.md):
+    # PIE: dead-syntax removal (no-op pass/spread/range-start, duplicate class
+    # fields) — stable, auto-fixable, zero-noise. PGH: suppression hygiene —
+    # no bare `noqa`/`type: ignore`, so every suppression is self-explanatory
+    # in review (complements RUF100, which prunes stale noqa). INP: a missing
+    # __init__.py silently breaks Frappe module/patch loading. YTT:
+    # sys.version misuse guards, cheap.
+    "PIE",
+    "PGH",
+    "INP",
+    "YTT",
+    # S rules are deliberately never selected: semgrep owns security scanning
+    # per ADR 0001. Also deliberately not selected: DTZ (frappe uses naive
+    # datetimes by convention), SLF (tests poke privates), FIX/TD (fires on
+    # the template's own DELETE-ME markers), D (docstring *coverage* fights
+    # the undocumented-hook idiom — correctness is pydoclint's job, see
+    # [tool.pydoclint]; DOC is preview-only in ruff until it stabilizes), PLC
+    # (function-level imports avoid circular imports), ERA (hooks.py is
+    # commented stubs by design), A (DocType kwargs shadow builtins by
+    # convention), SLOT (framework-managed classes), ARG (Frappe hook
+    # signatures carry unused args by design), TC (fights
+    # export_python_type_annotations — annotations are read at runtime), FLY
+    # (overlaps UP032, ignored for translations), COM/Q (formatter-owned),
+    # BLE (broad-except + frappe.log_error is a sanctioned idiom).
+]
+ignore = [
+    "B017", # assertRaises(Exception) - should be more specific
+    "B018", # useless expression, not assigned to anything
+    "B023", # function doesn't bind loop variable - will have last iteration's value
+    "B904", # raise inside except without from
+    "E101", # indentation contains mixed spaces and tabs
+    "E402", # module level import not at top of file
+    "E501", # line too long
+    "E741", # ambiguous variable name
+    "F401", # "unused" imports
+    "F403", # can't detect undefined names from * import
+    "F405", # can't detect undefined names from * import
+    "F722", # syntax error in forward type annotation
+    "W191", # indentation contains tabs
+    "UP030", # Use implicit references for positional format fields (translations)
+    "UP031", # Use format specifiers instead of percent format
+    "UP032", # Use f-string instead of `format` call (translations)
+    "UP037", # quoted annotations
+    "UP040", # Use type aliases instead of type annotations
+]
+typing-modules = ["frappe.types.DF"]
+
+[tool.pydoclint]
+# Docstring correctness without coverage (ADR 0005): undocumented functions
+# are never checked, and short description-only docstrings are skipped — this
+# is what makes the check compatible with the undocumented-hook idiom that
+# rules out pydocstyle's D family. darglint/darglint2 were evaluated and
+# rejected (archived/stale).
+style = "google"
+skip-checking-short-docstrings = true
+
+[tool.djlint]
+profile = "jinja"
+# Tune if Frappe-flavored pages trip SEO/inline rules that don't apply to
+# desk pages, e.g.: ignore = "H030,H021"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "tab"
+docstring-code-format = true
+
+[tool.mypy]
+# basedmypy, configured like frappe core's own setup (ADR 0003): non-strict,
+# with an explicit files= list scoped to this app's own modules rather than
+# the whole tree. Widen `files` as the app grows.
+strict = false
+# Check against the Python floor (requires-python), not the running interpreter.
+python_version = "3.13"
+pretty = true
+incremental = true
+sqlite_cache = true
+# basedmypy flips these Any-strictness flags on by default; they fight
+# frappe's dynamism (framework imports resolve to Any when the checker runs
+# without a bench, and `frappe.whitelist` is untyped). Frappe core makes the
+# same trade-off in its own [tool.mypy] config.
+disallow_any_expr = false
+disallow_any_unimported = false
+disallow_subclassing_any = false
+disallow_any_decorated = false
+disallow_untyped_decorators = false
+# Strictness beyond frappe core's own config (verified zero-finding on this
+# repo): every function must be fully annotated, and Any leaks / useless
+# machinery are warned on. Propagates a typed-code habit to derived apps.
+disallow_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+files = [
+    "smart_npd_module/api.py",
+    "smart_npd_module/hooks.py",
+    "smart_npd_module/smart_npd_module/",
+    "smart_npd_module/tests/",
+]
+exclude = [
+    '/test_.+\.py$',
+    '^smart_npd_module/patches',
+]
+
+# Framework internals are not resolvable in every checking environment (the CI
+# linter leg runs without a bench); in a bench env frappe resolves and is
+# checked against normally.
+[[tool.mypy.overrides]]
+module = ["frappe", "frappe.*"]
+ignore_missing_imports = true

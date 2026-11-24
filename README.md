@@ -13,10 +13,6 @@ bench get-app $URL_OF_THIS_REPO --branch main
 bench --site your_site install-app smart_npd_module
 ```
 
-Symlink-based development benches work identically via
-`bench get-app --soft-link`; CI proves both modes on pushes to `main` and
-every pull request.
-
 ## Contributing
 
 This app uses `pre-commit` for code formatting and linting. Please
@@ -45,8 +41,7 @@ The following GitHub Actions workflows are configured:
 
 - **CI** (`.github/workflows/ci.yml`, pushes to `main` + PRs): installs the app
   and runs the test suite on Frappe `version-15` (Python 3.13) and
-  `version-16` (Python 3.14), Node 24 on both, plus a `bench get-app --soft-link` install
-  smoke leg on v16.
+  `version-16` (Python 3.14), Node 24 on both.
 - **Linters** (`.github/workflows/linter.yml`, PRs): Frappe semgrep rules +
   `r/python.lang.correctness` + `r/python.lang.best-practice` + `p/bandit`,
   basedmypy type checking, pip-audit, gitleaks, markdownlint, and commitlint.
